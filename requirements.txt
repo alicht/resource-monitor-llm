@@ -1,4 +1,8 @@
 streamlit
-pandas
 psutil
-pynvml
+matplotlib
+tensorflow
+numpy
+openai
+python-dotenv
+pandas
