@@ -1,31 +1,54 @@
-import os
-import time
-import random
-import psutil
-import streamlit as st
-import matplotlib.pyplot as plt
-from dotenv import load_dotenv
 import openai
+import streamlit as st
+import os
+from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
+
+# Set OpenAI API Key
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Function to analyze and optimize prompts
+def optimize_prompt(prompt):
+    # Predefined optimizations
+    optimizations = [
+        {"pattern": "In order to", "suggestion": "To"},
+        {"pattern": "Due to the fact that", "suggestion": "Because"},
+        {"pattern": "It is important to note that", "suggestion": "Note that"},
+        {"pattern": "For the purpose of", "suggestion": "For"},
+    ]
+    
+    optimized_prompt = prompt
+    suggestions = []
+
+    for opt in optimizations:
+        if opt["pattern"] in prompt:
+            optimized_prompt = optimized_prompt.replace(opt["pattern"], opt["suggestion"])
+            suggestions.append(f"Replace '{opt['pattern']}' with '{opt['suggestion']}'.")
+
+    return optimized_prompt, suggestions
 
 # Function to track OpenAI usage
 def track_openai_usage(prompt, model="gpt-3.5-turbo"):
     try:
+        # Optimize the prompt
+        optimized_prompt, suggestions = optimize_prompt(prompt)
+
+        # Make API request
         response = openai.ChatCompletion.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": optimized_prompt}
             ]
         )
+
+        # Extract token usage and response details
         total_tokens = response["usage"]["total_tokens"]
         prompt_tokens = response["usage"]["prompt_tokens"]
         completion_tokens = response["usage"]["completion_tokens"]
         cost = calculate_cost(total_tokens, model)
-        optimization_tip = get_cost_optimization_tip(total_tokens, model)
 
         return {
             "response": response["choices"][0]["message"]["content"],
@@ -33,100 +56,43 @@ def track_openai_usage(prompt, model="gpt-3.5-turbo"):
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "cost": cost,
-            "optimization_tip": optimization_tip,
+            "suggestions": suggestions
         }
     except Exception as e:
         return {"error": str(e)}
 
 # Function to calculate cost
 def calculate_cost(total_tokens, model):
-    pricing = {"gpt-3.5-turbo": 0.002, "gpt-4": 0.03}
+    pricing = {"gpt-3.5-turbo": 0.002, "gpt-4": 0.03}  # Per 1k tokens
     cost_per_token = pricing.get(model, 0.001)
     return (total_tokens / 1000) * cost_per_token
 
-# Function to generate cost optimization tip
-def get_cost_optimization_tip(total_tokens, model):
-    if model == "gpt-4" and total_tokens > 1000:
-        return "Consider switching to GPT-3.5-turbo for large prompts to save up to 93% on costs."
-    elif model == "gpt-3.5-turbo" and total_tokens > 2000:
-        return "Optimize your prompt to reduce token usage and save costs."
-    return "Your model choice is already cost-effective for this workload."
+# Streamlit App
+st.title("LLM Usage Insights with Cost Optimization")
 
-# Function to check system resources
-def check_resources():
-    return {
-        "CPU Usage (%)": psutil.cpu_percent(interval=0),
-        "Memory Usage (%)": psutil.virtual_memory().percent,
-        "GPU Utilization (%)": random.randint(0, 70),
-        "GPU Memory Usage (%)": random.randint(0, 80),
-    }
+# Sidebar for user input
+st.sidebar.header("LLM Insights")
+prompt = st.sidebar.text_area("Enter your LLM prompt:")
 
-# Streamlit app
-st.title("Spaire: Optimize AI Workflows and Costs")
-st.write("Monitor resources, track LLM usage, and gain actionable insights.")
-
-# Tabs for organization
-tab1, tab2 = st.tabs(["Resource Monitoring", "LLM Insights"])
-
-# Tab 1: Resource Monitoring
-with tab1:
-    st.subheader("Live Resource Monitoring")
-    col1, col2 = st.columns(2)
-
-    if "cpu_data" not in st.session_state:
-        st.session_state.cpu_data = []
-        st.session_state.memory_data = []
-        st.session_state.gpu_data = []
-        st.session_state.gpu_memory_data = []
-
-    resources = check_resources()
-    st.session_state.cpu_data.append(resources["CPU Usage (%)"])
-    st.session_state.memory_data.append(resources["Memory Usage (%)"])
-    st.session_state.gpu_data.append(resources["GPU Utilization (%)"])
-    st.session_state.gpu_memory_data.append(resources["GPU Memory Usage (%)"])
-
-    with col1:
-        st.metric("CPU Usage", f"{resources['CPU Usage (%)']}%")
-        st.metric("Memory Usage", f"{resources['Memory Usage (%)']}%")
-    with col2:
-        st.metric("GPU Utilization", f"{resources['GPU Utilization (%)']}%")
-        st.metric("GPU Memory Usage", f"{resources['GPU Memory Usage (%)']}%")
-
-    fig, ax = plt.subplots()
-    ax.plot(st.session_state.cpu_data, label="CPU Usage (%)", color="blue")
-    ax.plot(st.session_state.memory_data, label="Memory Usage (%)", color="green")
-    ax.plot(st.session_state.gpu_data, label="GPU Utilization (%)", color="red")
-    ax.plot(st.session_state.gpu_memory_data, label="GPU Memory Usage (%)", color="purple")
-    ax.legend()
-    ax.set_ylim(0, 100)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Usage (%)")
-    ax.set_title("System Resource Usage (Real-Time)")
-    st.pyplot(fig)
-
-# Tab 2: LLM Insights
-with tab2:
-    st.subheader("LLM Usage Insights with Cost Optimization")
-    example_prompts = [
-        "Write a creative ad for a coffee shop.",
-        "Summarize the following text: [Add your text here]",
-        "What are the benefits of AI in education?",
-    ]
-    selected_prompt = st.selectbox("Choose an example prompt:", [""] + example_prompts)
-    user_prompt = st.text_area("Or enter your own prompt:", value=selected_prompt)
-
-    if st.button("Track Usage"):
-        if user_prompt:
-            with st.spinner("Fetching LLM insights..."):
-                result = track_openai_usage(user_prompt)
-            if "error" in result:
-                st.error(result["error"])
-            else:
-                st.write("**Response:**", result["response"])
-                st.write(f"**Total Tokens Used:** {result['total_tokens']}")
-                st.write(f"**Prompt Tokens:** {result['prompt_tokens']}")
-                st.write(f"**Completion Tokens:** {result['completion_tokens']}")
-                st.write(f"**Cost of Request:** ${result['cost']:.4f}")
-                st.write("**Cost Optimization Tip:**", result["optimization_tip"])
+# Display insights upon user action
+if st.sidebar.button("Optimize and Track Usage"):
+    if prompt:
+        result = track_openai_usage(prompt)
+        if "error" in result:
+            st.error(result["error"])
         else:
-            st.warning("Please enter a prompt or select an example.")
+            st.subheader("Optimized Prompt Suggestions")
+            st.write("Suggestions for optimization:")
+            for suggestion in result["suggestions"]:
+                st.write(f"- {suggestion}")
+
+            st.subheader("Optimized Response")
+            st.write(result["response"])
+
+            st.subheader("Usage Details")
+            st.write(f"**Total Tokens Used:** {result['total_tokens']}")
+            st.write(f"**Prompt Tokens:** {result['prompt_tokens']}")
+            st.write(f"**Completion Tokens:** {result['completion_tokens']}")
+            st.write(f"**Cost of Request:** ${result['cost']:.4f}")
+    else:
+        st.warning("Please enter a prompt.")
